@@ -1,0 +1,53 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'SERVER_IP', defaultValue: '18.206.232.61', description: 'EC2 Public IP')
+        string(name: 'DEST_SERVER_IP', defaultValue: '172.31.60.47', description: 'Destination Server IP')
+		string(name: 'S3_SOURCE_PRIVATE_KEY_PATH', defaultValue: 'awspemkeys/web.pem', description: 'S3 path to private key')
+		string(name: 'S3_DESTINATION_PRIVATE_KEY_PATH', defaultValue: 'awspemkeys/terraform.pem', description: 'S3 path to private key')
+        string(name: 'SOURCE_PRIVATE_KEY_PATH', defaultValue: '/var/lib/jenkins/workspace/SSH-PEM-KEY/web.pem', description: 'Local path to save private key')
+        string(name: 'DESTINATION_PRIVATE_KEY_PATH', defaultValue: '/var/lib/jenkins/workspace/SSH-PEM-KEY/terraform.pem', description: 'Local path to save private key')
+    }
+
+    stages {
+        stage('Switch to Root User') {
+            steps {
+                script {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awskey', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+					    sh "aws s3 cp s3://${params.S3_SOURCE_PRIVATE_KEY_PATH} ${params.SOURCE_PRIVATE_KEY_PATH}"  
+					    sh "chmod 400 ${params.SOURCE_PRIVATE_KEY_PATH}"
+						sh "aws s3 cp s3://${params.S3_DESTINATION_PRIVATE_KEY_PATH} ${params.DESTINATION_PRIVATE_KEY_PATH}"
+                        sh "chmod 400 ${params.DESTINATION_PRIVATE_KEY_PATH}"
+						
+                        sshScript = """
+                            ssh -o StrictHostKeyChecking=no -i ${params.SOURCE_PRIVATE_KEY_PATH} ubuntu@${params.SERVER_IP} <<-EOF
+                                sudo su - root
+                                
+                                #SSH-KEY TO SOURCE SERVER
+                                if [ ! -f ~/.ssh/id_rsa ]; then
+                                    ssh-keygen -t rsa -N "" -C 'ssh-key' -f ~/.ssh/id_rsa
+                                fi
+                                cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+                                cat ~/.ssh/authorized_keys
+                                
+                                #INSTALL AWS CLI
+                                apt update -y
+                                apt install -y awscli gnupg2 curl unzip
+
+                                exit
+
+                        """
+                        sh sshScript
+                    }
+                }
+            }
+        }
+    }
+}
+
+add one more stage as connect to params.SOURCE_PRIVATE_KEY_PATH with SERVER_IP and copy the ${params.DESTINATION_PRIVATE_KEY_PATH} to  SERVER_IP dirctory of /root/.ssh/
+
+mv ${params.DESTINATION_PRIVATE_KEY_PATH} /root/.ssh/
+cat /root/.ssh/authorized_keys | ssh -o StrictHostKeyChecking=no -i /root/.ssh/ ubuntu@${params.DEST_SERVER_IP} 'cat >> /home/ubuntu/.ssh/authorized_keys'
+                                
